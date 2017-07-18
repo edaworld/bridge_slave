@@ -1,0 +1,5 @@
+[0718/104119:ERROR:tcp_socket_win.cc(335)] bind() returned an error: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。 (0x2740)
+[0718/104119:ERROR:devtools_http_handler.cc(229)] Cannot start http server for devtools. Stop devtools.
+[0718/104128:ERROR:cache_util_win.cc(20)] Unable to move the cache: 5
+[0718/104128:ERROR:cache_util.cc(134)] Unable to move cache folder C:\ProgramData\Altium\Altium Designer {7B2C565A-EC2C-4EC6-8BFF-03B9D175EAFC}\BrowserCache to C:\ProgramData\Altium\Altium Designer {7B2C565A-EC2C-4EC6-8BFF-03B9D175EAFC}\old_BrowserCache_000
+[0718/104128:ERROR:cache_creator.cc(129)] Unable to create cache
