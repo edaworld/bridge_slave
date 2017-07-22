@@ -10,8 +10,8 @@
 #include "bsp.h"
 #include <stdio.h>
 
-#define gb_SF  2 //决定扩频因子的下标
-#define gb_BW  9 //决定带宽的下标
+#define gb_SF  1 //决定扩频因子的下标
+#define gb_BW  8 //决定带宽的下标
 #define CR     0x04
 #define CRC_EN   0x00  //CRC Enable
 

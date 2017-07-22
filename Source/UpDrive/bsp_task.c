@@ -10,11 +10,7 @@ extern uint8_t TPCTaskNum; //任务数量，在bsp_task.c中被初始化，bsp_tpc.c中使用
 extern uint8_t IsEnterIRQ;  //在main.c中监测lora的IRQ引脚，有状态变化即为接收到lora数据，置位
 uint8_t IsReceiveHostData = FALSE; //从主机广播包解析正确，设置的标志位
 SLAVEDATA s_SlaveData; //从机发送到主机的结构体
-
-//uint8_t BlEisReady = FALSE; //进入串口，同时接收到了正确的数据，标志位
-//SLVMSG_T s_tSlaMsg; //STM32发送从机数据的结构体
-//uint8_t KeyScan(void); //基于状态机的按键扫描函数
-
+READVALUE s_ReadData; //发送实部和虚部的结构体
 /************************任务结构体说明*************************************/
 /**
     typedef struct _TPC_TASK
@@ -31,11 +27,9 @@ TPC_TASK TaskComps[4] =
 {
 	//添加新任务时，请注意单个任务中改变任务属性的代码
 	{ 0, 0, 10, 1000, Task_LEDDisplay }, // 静态任务，LED闪烁任务，时间片到达即可执行
-	{ 0, 0, 1, 5, Task_RecvfromHost }, // 静态任务，处理从SPI接口的SX127 8接收的数据任务，时间片到达即可执行
-	{ 1, 0, 1, 5, Task_SendToHost }, // 动态任务，收到广播信号，发送从机数据到主机
-
-
-    { 0, 0, 1, 1000, Task_ReadAD5933 }, // 读取AD5933任务
+	{ 0, 0, 1, 1, Task_RecvfromHost }, // 静态任务，处理从SPI接口的SX127 8接收的数据任务，时间片到达即可执行
+	{ 1, 0, 1, 1, Task_SendToHost }, // 动态任务，收到广播信号，发送从机数据到主机
+	{ 1, 0, 1, 50, Task_ReadAD5933 }, // 读取AD5933任务
 //    { 0, 0, 1, 10, Task_KeyScan }, // 按键扫描任务
 //    { 0, 0, 2, 8, Task_PowerCtl }, // 按键扫描任务
 //    { 0, 0, 3, 10, Task_ADCProcess} //采集电池电量任务
@@ -55,10 +49,14 @@ void TaskInit ( void )
     函 数 名: Task_LEDDisplay
     功能说明: LED闪烁代码
 *********************************************************************************************************/
+static char printbuffer1[32];
+static uint64_t ledtoggletimes;
 void Task_LEDDisplay ( void )
 {
-    LED1_TOGGLE(); //蓝色D3
-	LCD_P6x8Str ( 0, 1, "LED1_TOGGLE" );
+	LED1_TOGGLE(); //蓝色D3
+	ledtoggletimes ++;
+	sprintf ( printbuffer1, "toggle times %d", ledtoggletimes );
+	LCD_P6x8Str ( 0, 0, printbuffer1 );
 }
 /*********************************************************************************************************
     函 数 名: Task_ReadAD5933
@@ -66,32 +64,41 @@ void Task_LEDDisplay ( void )
 *********************************************************************************************************/
 static unsigned char temp;
 static unsigned int real, img;
-static uint8_t printbuffer3[32];
-static uint8_t readAD5933count;
+static char printbuffer2[32];
+static uint32_t readAD5933count;
 void Task_ReadAD5933 ( void )
 {
-
-	AD5933_Set_Mode_Freq_Start();
-  
-	if ( ( AD5933_Get_DFT_ST() & 0x04 ) != 0x04 )
+	DISABLE_INT();
+	temp = AD5933_Get_DFT_ST();
+	ENABLE_INT();
+	if ( ( temp & 0x04 ) != 0x04 )
 	{
-
-		while ( 1 ) //wait for DFT finish
+		if ( temp & 0x02 ) //实部和虚部有效
 		{
-			temp = AD5933_Get_DFT_ST();
-			if ( temp & 0x02 ) //实部和虚部有效
-			{ break; }
-		}      
-		real = AD5933_Get_Real();
-		img  = AD5933_Get_Img();
-		AD5933_Set_Mode_Freq_UP();
-        readAD5933count ++;
-        sprintf ( printbuffer3, "count is :%d", readAD5933count );
-        LCD_P6x8Str ( 0, 4, printbuffer3 );
-        sprintf ( printbuffer3, "real is :%d", real );
-        LCD_P6x8Str ( 0, 5, printbuffer3 );        
-        sprintf ( printbuffer3, "img is :%d", img );
-        LCD_P6x8Str ( 0, 6, printbuffer3 );          
+            s_ReadData.head = '&';
+            s_ReadData.tail = '%'; 
+            s_ReadData.msg[1] = 0x07;
+			s_ReadData.msg[2] = 0x01; 
+            
+			real = AD5933_Get_Real();
+ 			img  = AD5933_Get_Img();           
+            s_ReadData.real = real;
+            s_ReadData.img = img;
+            
+            RFSendData(s_ReadData.msg, 12);
+			AD5933_Set_Mode_Freq_UP();
+			readAD5933count ++;
+			sprintf ( printbuffer2, "read5933 times %d", readAD5933count );
+			LCD_P6x8Str ( 0, 1, printbuffer2 );
+			sprintf ( printbuffer2, "real is :%X", real );
+			LCD_P6x8Str ( 0, 5, printbuffer2 );
+			sprintf ( printbuffer2, "img is :%X", img );
+			LCD_P6x8Str ( 0, 6, printbuffer2 );
+		}
+	}
+	else if ( ( temp & 0x04 ) == 0x04 )
+	{
+		TaskComps[3].attrb = 1;
 	}
 }
 
@@ -99,43 +106,31 @@ void Task_ReadAD5933 ( void )
     函 数 名: Task_RecvfromLora
     功能说明: 处理从SPI接口的Lora接收的数据任务
 *********************************************************************************************************/
-
 static uint8_t recvdatbuffer[32];   //接收数据缓冲区
-static uint8_t printbuffer1[32]; //接收数据打印缓冲区
+static char printbuffer3[32]; //接收数据打印缓冲区
 static uint8_t ucrevcount;
 void Task_RecvfromHost ( void )
 {
 	uint8_t length;
 	if ( IsEnterIRQ  == TRUE ) //主函数中检测到中断引脚为高，表示接收到数据后，置位该标志位
 	{
-//		OLEDPrint(0, 2, "RF Received");
-//		sprintf(sendBuf, "连续发送:%d", bsp_GetRunTime());
-//		OLEDPrint(0, 2, sendBuf);
-//		printf("\t%d\n", bsp_GetRunTime()); //测试超时时间
-//		以下两个操作耗时8ms
 		length = RFM96_LoRaRxPacket ( recvdatbuffer );
-//        RFM96_LoRaRxPacket(recvdatbuffer);
 		RFRxMode();
-//		以上两个操作耗时8ms
-//		printf("\t%d\n", bsp_GetRunTime()); //测试超时时间
 		if ( length > 0 )
 		{
 			ucrevcount++;
-			sprintf ( printbuffer1, "rcvcnt is :%d", ucrevcount );
 		}
-//		OLEDPrint(0, 2, recvprintbuffer);
-//		printf("receive data length is %d\n", length);
-//		COMx_SendBuf(COM1, recvdatbuffer, 6);
 		if ( ( recvdatbuffer[0] == '%' ) && ( recvdatbuffer[8] == '&' ) )
 		{
 			IsReceiveHostData = TRUE;   //设置接收到的主机包标志位
 			TaskComps[2].attrb = 0; //将节点发送任务设置为静态任务
-			LCD_P6x8Str ( 0, 2, printbuffer1 );
+			sprintf ( printbuffer3, "rcvhost times %d", ucrevcount );            
+			LCD_P6x8Str ( 0, 2, printbuffer3 );
 		}
 		IsEnterIRQ = FALSE;
 	}
 }
-static uint8_t printbuffer2[32]; //接收数据打印缓冲区
+static char printbuffer4[32]; //接收数据打印缓冲区
 /*********************************************************************************************************
     函 数 名: Task_SendToMaster
     功能说明: 发送数据包至主机任务
@@ -144,46 +139,47 @@ void Task_SendToHost ( void )
 {
 	if ( IsReceiveHostData == TRUE ) //接收到主机发送过来的信号
 	{
-		
 		if ( recvdatbuffer[1] == 0xEF ) //握手指令
 		{
 			s_SlaveData.msg[1] = 0xEF;
 			s_SlaveData.msg[2] = 0x01;
 		}
-        if( recvdatbuffer[1] == 0x7F) //设置起始频率、截止频率、测量点数、PZT和阻抗量程
-        {
-            memcpy(s_SlaveData.msg,recvdatbuffer,12);
-            
-            AD5933_Set_Freq_Start(s_SlaveData.msg[2]);
-            AD5933_Set_Freq_Num(s_SlaveData.data);
-            AD5933_Set_Freq_Add((s_SlaveData.msg[3]-s_SlaveData.msg[2])*1000/s_SlaveData.data);
-            pztMuxSwitch(s_SlaveData.msg[9]);
-            rfbMuxSwitch(s_SlaveData.msg[10]);
-                       
+		if ( recvdatbuffer[1] == 0x7F ) //设置起始频率、截止频率、测量点数、PZT和阻抗量程
+		{
+			memcpy ( s_SlaveData.msg, recvdatbuffer, 12 );
+			AD5933_Set_Freq_Start ( s_SlaveData.msg[2] );
+			AD5933_Set_Freq_Num ( s_SlaveData.data );
+//			sprintf ( printbuffer4, "data is :%d", s_SlaveData.data );            
+//			LCD_P6x8Str ( 0, 3, printbuffer4 );            
+			AD5933_Set_Freq_Add ( ( s_SlaveData.msg[3] - s_SlaveData.msg[2] ) * 1000 / s_SlaveData.data );
+			pztMuxSwitch ( s_SlaveData.msg[9] );
+			rfbMuxSwitch ( s_SlaveData.msg[10] );
 			s_SlaveData.msg[1] = 0x7F;
-			s_SlaveData.msg[2] = 0x01;             
-        }
-        if(recvdatbuffer[1] == 0x3F)//设置单频测量指令
-        {
-            AD5933_Set_Mode_Freq_Repeat(); 
+			s_SlaveData.msg[2] = 0x01;
+		}
+		if ( recvdatbuffer[1] == 0x3F ) //设置单频测量指令
+		{
+			AD5933_Set_Mode_Freq_Repeat();
 			s_SlaveData.msg[1] = 0x3F;
-			s_SlaveData.msg[2] = 0x01;            
-        }
-        if(recvdatbuffer[1] == 0x1F)//设置扫频测量指令
-        {
-            AD5933_Set_Mode_Freq_UP();
+			s_SlaveData.msg[2] = 0x01;
+		}
+		if ( recvdatbuffer[1] == 0x1F ) //设置扫频测量指令
+		{
+			AD5933_Set_Mode_Freq_UP();
 			s_SlaveData.msg[1] = 0x1F;
-			s_SlaveData.msg[2] = 0x01;            
-        }
-        if(recvdatbuffer[1] == 0x0F)
-        {
+			s_SlaveData.msg[2] = 0x01;
+		}
+		if ( recvdatbuffer[1] == 0x0F )//启动监测指令
+		{
 			s_SlaveData.msg[1] = 0x0F;
 			s_SlaveData.msg[2] = 0x01;
-            TaskComps[3].attrb = 0;
-        }
-        
+			Init_AD5933();
+			AD5933_Set_Mode_Freq_Start();
+//			OLED_CLS();
+			TaskComps[3].attrb = 0;
+		}
 		s_SlaveData.head = '&';
-		s_SlaveData.tail = '%';                
+		s_SlaveData.tail = '%';
 		RFSendData ( s_SlaveData.msg, 12 ); //发送该节点数据
 		mem_set ( s_SlaveData.msg, 0, 12 ); //发送完毕后将结构体数据清零
 		TaskComps[2].attrb = 1; //将发送节点数据任务设置为动态任务，等待再次接收到广播信号

@@ -14,9 +14,6 @@
 *********************************************************************************************************/
 void bsp_Init ( void )
 {
-//  由于ST固件库的启动文件已经执行了CPU系统时钟的初始化，所以不必再次重复配置系统时钟。
-//  启动文件配置了CPU主时钟频率、内部Flash访问速度和可选的外部SRAM FSMC初始化。
-//  系统时钟缺省配置为72MHz，如果需要更改，可以修改 system_stm32f10x.c 文件
 	/* 优先级分组设置为4 */
 //	NVIC_PriorityGroupConfig ( NVIC_PriorityGroup_4 ); //初始化中断优先级
 	LED_Init(); //初始化Led的GPIO
@@ -32,23 +29,25 @@ void bsp_Init ( void )
 	OLED_Init();  //初始化OLed的GPIO并配置
 	OLED_CLS();
 	OLED_Fill ( 0x00 );
-	LCD_P6x8Str ( 0, 0, "OLED Test" );
+//	LCD_P6x8Str ( 0, 0, "OLED Test" );
 	/*以下为开启3个串口*/
 	UART_InitALL(); //初始化串口
     
 //	ADC_Configuration(); //初始化ADC0
 
-//	/*初始化SX1278*/
+//	初始化SX1278
     RFGPIOInit();
 	RFInit();    //射频模块初始化
 	RFRxMode();  //进入接收模式
 
-//	/*初始化AD5933*/
+//	初始化AD5933
     I2C_EE_Init();
     Init_AD5933();
     
+//  初始化多路选择器    
     bsp_pztMux_Init();
-    bsp_rfbMux_Init();    
+    bsp_rfbMux_Init(); 
+    
 }
 
 /*
