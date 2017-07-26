@@ -1,6 +1,5 @@
 #include "bsp.h"
 
-#define NULL 0
 //extern uint8_t g_uart1_timeout; //检测串口1接收数据超时的全局变量，在bsp_slavemsg.c文件中声明
 //extern uint8_t g_uart2_timeout; //检测串口2接收数据超时的全局变量
 //extern RECVDATA_T g_tUart1; //初始化从串口1，BLE接收数据结构体，在bsp_slavemsg.c文件中声明
@@ -8,30 +7,21 @@
 
 extern uint8_t TPCTaskNum; //任务数量，在bsp_task.c中被初始化，bsp_tpc.c中使用
 extern uint8_t IsEnterIRQ;  //在main.c中监测lora的IRQ引脚，有状态变化即为接收到lora数据，置位
-uint8_t IsReceiveHostData = FALSE; //从主机广播包解析正确，设置的标志位
+
+uint8_t IsReceiveHostData = FALSE; //正确接收主机的数据包标志位
 SLAVEDATA s_SlaveData; //从机发送到主机的结构体
 READVALUE s_ReadData; //发送实部和虚部的结构体
-/************************任务结构体说明*************************************/
-/**
-    typedef struct _TPC_TASK
-    {
-	uint8_t   attrb;  //静态任务：0，动态任务：1
-	uint8_t   Run;  // 程序运行标记，0：不运行，1：运行xternt
-	uint16_t  Timer;  // 计时器
-	uint16_t  ItvTime;  // 任务运行间隔时间
-	void      (*Task)(void); // 要运行的任务函数
-    } TPC_TASK; // 任务定义
-**/
-/************************任务结构体说明*************************************/
+static uint32_t measureNumbers;
+uint8_t isSingbleMeasureFlag = FALSE;
+
 TPC_TASK TaskComps[4] =
 {
 	//添加新任务时，请注意单个任务中改变任务属性的代码
 	{ 0, 0, 10, 1000, Task_LEDDisplay }, // 静态任务，LED闪烁任务，时间片到达即可执行
-	{ 0, 0, 1, 1, Task_RecvfromHost }, // 静态任务，处理从SPI接口的SX127 8接收的数据任务，时间片到达即可执行
-	{ 1, 0, 1, 1, Task_SendToHost }, // 动态任务，收到广播信号，发送从机数据到主机
-	{ 1, 0, 1, 50, Task_ReadAD5933 }, // 读取AD5933任务
+	{ 0, 0, 1, 5, Task_RecvfromHost }, // 静态任务，处理从SPI接口的SX127 8接收的数据任务，时间片到达即可执行
+	{ 1, 0, 1, 5, Task_SendToHost }, // 动态任务，收到广播信号，发送从机数据到主机
+	{ 1, 0, 1, 100, Task_ReadAD5933 }, // 读取AD5933任务
 //    { 0, 0, 1, 10, Task_KeyScan }, // 按键扫描任务
-//    { 0, 0, 2, 8, Task_PowerCtl }, // 按键扫描任务
 //    { 0, 0, 3, 10, Task_ADCProcess} //采集电池电量任务
 };
 
@@ -50,7 +40,7 @@ void TaskInit ( void )
     功能说明: LED闪烁代码
 *********************************************************************************************************/
 static char printbuffer1[32];
-static uint64_t ledtoggletimes;
+static int64_t ledtoggletimes;
 void Task_LEDDisplay ( void )
 {
 	LED1_TOGGLE(); //蓝色D3
@@ -86,20 +76,35 @@ void Task_ReadAD5933 ( void )
             s_ReadData.img = img;
             
             RFSendData(s_ReadData.msg, 12);
-			AD5933_Set_Mode_Freq_UP();
-			readAD5933count ++;
+            if(isSingbleMeasureFlag == 0)
+                AD5933_Set_Mode_Freq_UP();
+
+            if(isSingbleMeasureFlag == 1)
+            {
+                AD5933_Set_Mode_Freq_Repeat();
+            }
+			readAD5933count ++;            
 			sprintf ( printbuffer2, "read5933 times %d", readAD5933count );
 			LCD_P6x8Str ( 0, 1, printbuffer2 );
-			sprintf ( printbuffer2, "real is :%X", real );
-			LCD_P6x8Str ( 0, 5, printbuffer2 );
-			sprintf ( printbuffer2, "img is :%X", img );
-			LCD_P6x8Str ( 0, 6, printbuffer2 );
+            
+//			sprintf ( printbuffer2, "real is :%X", real );
+//			LCD_P6x8Str ( 0, 5, printbuffer2 );
+//			sprintf ( printbuffer2, "img is :%X", img );
+//			LCD_P6x8Str ( 0, 6, printbuffer2 );
 		}
 	}
 	else if ( ( temp & 0x04 ) == 0x04 )
 	{
 		TaskComps[3].attrb = 1;
+        readAD5933count = 0;
 	}
+    
+    if(readAD5933count == measureNumbers)
+    {
+        TaskComps[3].attrb = 1;
+        readAD5933count = 0;
+    }
+    
 }
 
 /*********************************************************************************************************
@@ -149,8 +154,9 @@ void Task_SendToHost ( void )
 			memcpy ( s_SlaveData.msg, recvdatbuffer, 12 );
 			AD5933_Set_Freq_Start ( s_SlaveData.msg[2] );
 			AD5933_Set_Freq_Num ( s_SlaveData.data );
-//			sprintf ( printbuffer4, "data is :%d", s_SlaveData.data );            
-//			LCD_P6x8Str ( 0, 3, printbuffer4 );            
+            measureNumbers = s_SlaveData.data;
+			sprintf ( printbuffer4, "measureNumbers is :%d", measureNumbers );            
+			LCD_P6x8Str ( 0, 3, printbuffer4 );            
 			AD5933_Set_Freq_Add ( ( s_SlaveData.msg[3] - s_SlaveData.msg[2] ) * 1000 / s_SlaveData.data );
 			pztMuxSwitch ( s_SlaveData.msg[9] );
 			rfbMuxSwitch ( s_SlaveData.msg[10] );
@@ -159,12 +165,14 @@ void Task_SendToHost ( void )
 		}
 		if ( recvdatbuffer[1] == 0x3F ) //设置单频测量指令
 		{
+            isSingbleMeasureFlag = 1;
 			AD5933_Set_Mode_Freq_Repeat();
 			s_SlaveData.msg[1] = 0x3F;
 			s_SlaveData.msg[2] = 0x01;
 		}
 		if ( recvdatbuffer[1] == 0x1F ) //设置扫频测量指令
 		{
+            isSingbleMeasureFlag = 0;
 			AD5933_Set_Mode_Freq_UP();
 			s_SlaveData.msg[1] = 0x1F;
 			s_SlaveData.msg[2] = 0x01;
@@ -178,6 +186,12 @@ void Task_SendToHost ( void )
 //			OLED_CLS();
 			TaskComps[3].attrb = 0;
 		}
+        if(recvdatbuffer[1] == 0x07)
+        {
+			s_SlaveData.msg[1] = 0x07;
+			s_SlaveData.msg[2] = 0x01;
+            AD5933_Set_Mode_Standby();
+        }
 		s_SlaveData.head = '&';
 		s_SlaveData.tail = '%';
 		RFSendData ( s_SlaveData.msg, 12 ); //发送该节点数据
@@ -243,17 +257,6 @@ void Task_SendToHost ( void )
 //void Task_KeyScan(void)
 //{
 //    KeyStatus = KeyScan();
-//}
-///*********************************************************************************************************
-//*   函 数 名: Task_PowerCtl
-//*   功能说明: PWR控制电源引脚，控制电源关闭的任务
-//*********************************************************************************************************/
-//void Task_PowerCtl(void)
-//{
-//    if(KeyStatus == 2)
-//    {
-//        KEY_PWR =  0;//关闭电源
-//    }
 //}
 /*********************************************************************************************************
     函 数 名: KeyScan

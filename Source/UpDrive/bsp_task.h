@@ -58,7 +58,6 @@ static void Task_LEDDisplay(void);  //LED闪烁任务
 static void Task_SendToHost(void); //发送数据至PC机
 static void Task_RecvfromHost(void); //从Lora（SX1278）所连接的串口2读取数据任务
 //static void Task_KeyScan(void); //扫描一键开机键的任务
-//static void Task_PowerCtl(void); //控制关机任务
 //static void Task_ADCProcess(void); //ADC采集串联分压电阻获得电量程序
 static void Task_ReadAD5933(void); //从AD5933读取电阻抗数据任务
 /********************************************************************************************************

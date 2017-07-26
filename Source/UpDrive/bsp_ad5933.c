@@ -5,7 +5,7 @@ unsigned int iMode;
 
 void Init_AD5933 ( void )
 {
-	int i, j, k;
+	volatile int i, j, k;
 //	AD5933_Set_Freq_Start ( 20000 ); //100Khz, 100K/1024 = 100Hz, data update rate is 100Hz!!!!!!
 //	AD5933_Set_Freq_Add ( 100 ); //设置频率增量为1
 //	AD5933_Set_Freq_Num ( 500 ); //设置增量数，也就是扫描中的频率点数
@@ -15,7 +15,9 @@ void Init_AD5933 ( void )
 	//delay for enough time
 	for ( i = 0; i < 1000; i++ )
 		for ( j = 0; j < 1000; j++ )
-		{ k = 0; }
+		{ 
+            k = 0; 
+        }
 }
 
 void Fre_To_Hex ( float fre, u8 *buf )
